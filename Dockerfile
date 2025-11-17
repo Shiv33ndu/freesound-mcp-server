@@ -69,23 +69,25 @@ ENV UV_PYTHON_DOWNLOADS=0
 
 WORKDIR /app
 
-# use cache mounts for faster rebuilds; this will run uv to populate .venv in builder
+# run uv to populate builder environment (cache mounts help dev iter)
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-dev
 
-# copy the project source into builder
+# copy project source into builder
 COPY . /app
 
-# run uv sync again to install project into the builder venv (if pyproject defines it)
+# run uv sync again (ensures project deps listed in pyproject are resolved in builder)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-### RUNTIME STAGE: lightweight image for running the app
+
+# ---------------------------------------------------------------------
+# Runtime stage: lightweight final image
+# ---------------------------------------------------------------------
 FROM python:3.10-slim-bookworm
 
-# ensure output isn't buffered (helps logs)
 ENV PYTHONUNBUFFERED=1
 
 # create non-root user "app" for security
@@ -94,32 +96,35 @@ RUN groupadd --gid 1000 app || true && \
 
 WORKDIR /app
 
-# copy application from the builder (don't rely on builder venv; copy project files)
+# copy project from builder
 COPY --from=builder /app /app
 
-# install minimal system packages required to build wheels (if any), then clean apt caches
+# Install small system build deps (only what is needed), then remove apt caches
 RUN apt-get update && \
     apt-get install -y --no-install-recommends build-essential ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Make sure the system Python has pip. If ensurepip fails it's okay, we still call python3 -m pip
+# Ensure system Python has pip available
 RUN python3 -m ensurepip || true
 
-# Use system python3 to upgrade pip and install runtime python packages.
-# This ensures pip is available and uses the runtime's Python environment (not a copied venv).
-RUN python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir -U fastmcp>=2.3.0 fastmcp-http httpx uvicorn anyio
+# Upgrade pip & build tools
+RUN python3 -m pip install --upgrade pip setuptools wheel
 
-# If your builder created /app/.venv and you want to prefer it, you can add it to PATH AFTER installing pip above.
-# But generally it's more robust to rely on system site-packages in runtime.
-# If you still want to use /app/.venv first, uncomment next line:
-# ENV PATH="/app/.venv/bin:$PATH"
+# Install your package (so 'python -m freesound_mcp_server.freesound' is importable)
+# This will work with both src/ layout and plain package layout.
+RUN python3 -m pip install --no-cache-dir /app
 
-# switch to non-root user
+# Install FastMCP and HTTP extras (ensures "http" transport is registered)
+RUN python3 -m pip install --no-cache-dir -U fastmcp>=2.3.0 fastmcp-http httpx uvicorn anyio
+
+# Fix ownership (so non-root user can read and run)
+RUN chown -R app:app /app
+
+# Switch to non-root user
 USER app
 
-# expose the typical port we'll listen on (Render injects PORT at runtime)
+# Expose the port (Render overrides PORT at runtime)
 EXPOSE 8000
 
-# Default command: start the freesound MCP server using Streamable HTTP
-CMD ["python3", "-m", "/app/src/freesound_mcp_server/freesound.py", "--transport", "http", "--host", "0.0.0.0"]
+# Final command: run module (module name, not file path). Your app should read PORT env var.
+CMD ["python3", "-m", "freesound_mcp_server.freesound", "--transport", "http", "--host", "0.0.0.0"]
