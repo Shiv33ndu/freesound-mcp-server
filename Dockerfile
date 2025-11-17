@@ -82,30 +82,38 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-# ---------------------------------------------------------------------
-# Runtime stage: lightweight final image
-# ---------------------------------------------------------------------
+### RUNTIME STAGE: lightweight image for running the app
 FROM python:3.10-slim-bookworm
 
 # ensure output isn't buffered (helps logs)
 ENV PYTHONUNBUFFERED=1
 
-# create non-root user "app" for security and to make chown valid
+# create non-root user "app" for security
 RUN groupadd --gid 1000 app || true && \
     useradd --uid 1000 --gid app --shell /usr/sbin/nologin --create-home app || true
 
 WORKDIR /app
 
-# copy files from builder; make app user the owner
-COPY --from=builder --chown=app:app /app /app
+# copy application from the builder (don't rely on builder venv; copy project files)
+COPY --from=builder /app /app
 
-# add virtualenv bin path if uv created one at /app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
+# install minimal system packages required to build wheels (if any), then clean apt caches
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
 
-# make sure pip & build tools are available, then install/upgrade fastmcp + http extras
-# This guarantees the "http" (Streamable HTTP) transport is registered in the final image.
-RUN python -m pip install --upgrade pip setuptools wheel && \
-    python -m pip install --no-cache-dir -U fastmcp>=2.3.0 fastmcp-http httpx uvicorn anyio
+# Make sure the system Python has pip. If ensurepip fails it's okay, we still call python3 -m pip
+RUN python3 -m ensurepip || true
+
+# Use system python3 to upgrade pip and install runtime python packages.
+# This ensures pip is available and uses the runtime's Python environment (not a copied venv).
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install --no-cache-dir -U fastmcp>=2.3.0 fastmcp-http httpx uvicorn anyio
+
+# If your builder created /app/.venv and you want to prefer it, you can add it to PATH AFTER installing pip above.
+# But generally it's more robust to rely on system site-packages in runtime.
+# If you still want to use /app/.venv first, uncomment next line:
+# ENV PATH="/app/.venv/bin:$PATH"
 
 # switch to non-root user
 USER app
@@ -114,5 +122,4 @@ USER app
 EXPOSE 8000
 
 # Default command: start the freesound MCP server using Streamable HTTP
-# Note: your Python code should read PORT from environment (os.getenv("PORT"))
-CMD ["python", "-m", "freesound_mcp_server.freesound", "--transport", "http", "--host", "0.0.0.0"]
+CMD ["python3", "-m", "freesound_mcp_server.freesound", "--transport", "http", "--host", "0.0.0.0"]
