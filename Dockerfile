@@ -49,10 +49,11 @@ EXPOSE 8000
 
 # default stdio transport
 # can be overridden at runtime for different transports
-CMD ["python", "-m", "freesound_mcp_server.freesound", "--transport", "stdio"]
+#CMD ["python", "-m", "freesound_mcp_server.freesound", "--transport", "stdio"]
 
 # CMD ["uv", "run", "freesound-mcp", "--transport", "stdio"]
 
-
+# Streamable HTTP transport
+CMD ["python", "-m", "freesound_mcp_server.freesound", "--transport", "http", "--host", "0.0.0.0"]
 
 
