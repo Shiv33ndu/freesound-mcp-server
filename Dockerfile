@@ -122,4 +122,4 @@ USER app
 EXPOSE 8000
 
 # Default command: start the freesound MCP server using Streamable HTTP
-CMD ["python3", "-m", "freesound_mcp_server.freesound", "--transport", "http", "--host", "0.0.0.0"]
+CMD ["python3", "-m", "/app/src/freesound_mcp_server/freesound.py", "--transport", "http", "--host", "0.0.0.0"]
