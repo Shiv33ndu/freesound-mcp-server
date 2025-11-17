@@ -97,4 +97,11 @@ def format_response(query: str, max_results: int, data: dict) -> dict:
     return formatted_results
 
 if __name__ == "__main__":
-    mcp.run(transport='stdio')
+    #mcp.run(transport='stdio')   # this is for STDIO Transport
+
+    # for HTTP Streamable service
+    mcp.run(
+        transport="http",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000))  # Render sets PORT dynamically
+    )
